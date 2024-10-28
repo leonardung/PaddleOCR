@@ -39,7 +39,7 @@ from ppocr.utils.utility import get_image_file_list
 import tools.program as program
 
 
-def draw_det_res(dt_boxes, config, img, img_name, save_path):
+def draw_det_res(dt_boxes, config, img, img_name, save_path, logger):
     import cv2
 
     src_im = img
@@ -54,7 +54,7 @@ def draw_det_res(dt_boxes, config, img, img_name, save_path):
 
 
 @paddle.no_grad()
-def main():
+def main(config, device, logger, vdl_writer):
     global_config = config["Global"]
 
     # build model
@@ -94,7 +94,6 @@ def main():
             images = paddle.to_tensor(images)
             preds = model(images)
             post_result = post_process_class(preds, shape_list)
-
             src_img = cv2.imread(file)
 
             dt_boxes_json = []
@@ -112,7 +111,9 @@ def main():
                     save_det_path = os.path.dirname(
                         config["Global"]["save_res_path"]
                     ) + "/det_results_{}/".format(k)
-                    draw_det_res(boxes, config, src_img, file, save_det_path)
+                    draw_det_res(boxes, config, src_img, file, save_det_path, logger)
+                    if k == "Student":
+                        dt_boxes_json = dt_boxes_list
             else:
                 boxes = post_result[0]["points"]
                 dt_boxes_json = []
@@ -124,7 +125,7 @@ def main():
                 save_det_path = (
                     os.path.dirname(config["Global"]["save_res_path"]) + "/det_results/"
                 )
-                draw_det_res(boxes, config, src_img, file, save_det_path)
+                draw_det_res(boxes, config, src_img, file, save_det_path, logger)
             otstr = file + "\t" + json.dumps(dt_boxes_json) + "\n"
             fout.write(otstr.encode())
 
@@ -133,4 +134,4 @@ def main():
 
 if __name__ == "__main__":
     config, device, logger, vdl_writer = program.preprocess()
-    main()
+    main(config, device, logger, vdl_writer)

@@ -38,7 +38,7 @@ from ppocr.utils.utility import get_image_file_list
 import tools.program as program
 
 
-def main():
+def main(config, device, logger, vdl_writer):
     global_config = config["Global"]
 
     # build post process
@@ -131,7 +131,7 @@ def main():
     infer_list = config["Global"].get("infer_list", None)
     with open(save_res_path, "w") as fout:
         for file in get_image_file_list(infer_imgs, infer_list=infer_list):
-            logger.info("infer_img: {}".format(file))
+            # logger.info("infer_img: {}".format(file))
             with open(file, "rb") as f:
                 img = f.read()
                 data = {"image": img}
@@ -203,4 +203,4 @@ def main():
 
 if __name__ == "__main__":
     config, device, logger, vdl_writer = program.preprocess()
-    main()
+    main(config, device, logger, vdl_writer)

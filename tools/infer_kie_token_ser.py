@@ -29,6 +29,7 @@ os.environ["FLAGS_allocator_strategy"] = "auto_growth"
 import cv2
 import json
 import paddle
+import paddle.nn.functional as F
 
 from ppocr.data import create_operators, transform
 from ppocr.modeling.architectures import build_model
@@ -74,6 +75,7 @@ class SerPredictor(object):
         from paddleocr import PaddleOCR
 
         self.ocr_engine = PaddleOCR(
+            lang="en",
             use_angle_cls=False,
             show_log=False,
             rec_model_dir=global_config.get("kie_rec_model_dir", None),
@@ -108,7 +110,7 @@ class SerPredictor(object):
         )
         self.model.eval()
 
-    def __call__(self, data):
+    def __call__(self, data, return_score=False):
         with open(data["img_path"], "rb") as f:
             img = f.read()
         data["image"] = img
@@ -116,16 +118,25 @@ class SerPredictor(object):
         batch = to_tensor(batch)
         preds = self.model(batch)
 
+        # Convert logits to probabilities using softmax
+        scores = F.softmax(preds, axis=-1)
+        predicted_classes = paddle.argmax(scores, axis=-1)
+
+        # Get the max score for each token
+        confidence_scores = paddle.max(scores, axis=-1)
+
         post_result = self.post_process_class(
             preds, segment_offset_ids=batch[6], ocr_infos=batch[7]
         )
+
+        if return_score:
+            return post_result, batch, predicted_classes, confidence_scores
         return post_result, batch
 
 
-if __name__ == "__main__":
-    config, device, logger, vdl_writer = program.preprocess()
+def main(config, device, logger, vdl_writer):
     os.makedirs(config["Global"]["save_res_path"], exist_ok=True)
-
+    font_path = config["Global"]["font_path"]
     ser_engine = SerPredictor(config)
 
     if config["Global"].get("infer_mode", None) is False:
@@ -155,8 +166,26 @@ if __name__ == "__main__":
                 os.path.splitext(os.path.basename(img_path))[0] + "_ser.jpg",
             )
 
-            result, _ = ser_engine(data)
+            result, _, predicted_classes, confidence_scores = ser_engine(
+                data, return_score=True
+            )
+            i = 0
+            scores = []
+            for classe, score in zip(
+                predicted_classes.numpy()[0], confidence_scores.numpy()[0]
+            ):
+                if classe % 2 == 1:
+                    scores.append(float(score))
+                    i += 1
+            if isinstance(result, dict):
+                result = result["Student"]
             result = result[0]
+            for i, res in enumerate(result):
+                if i < len(scores):
+                    res["score"] = scores[i]
+                else:
+                    res["score"] = 0
+
             fout.write(
                 img_path
                 + "\t"
@@ -168,11 +197,27 @@ if __name__ == "__main__":
                 )
                 + "\n"
             )
-            img_res = draw_ser_results(img_path, result)
-            cv2.imwrite(save_img_path, img_res)
+            img_res = draw_ser_results(img_path, result, font_path=font_path)
+            dir_name, base_name = os.path.split(save_img_path)
+            name, ext = os.path.splitext(base_name)
+            n = 1
+            new_base_name = f"{name}_{n}{ext}"
+            new_save_img_path = os.path.join(dir_name, new_base_name)
+
+            while os.path.exists(new_save_img_path):
+                n += 1
+                new_base_name = f"{name}_{n}{ext}"
+                new_save_img_path = os.path.join(dir_name, new_base_name)
+
+            cv2.imwrite(new_save_img_path, img_res)
 
             logger.info(
                 "process: [{}/{}], save result to {}".format(
-                    idx, len(infer_imgs), save_img_path
+                    idx, len(infer_imgs), new_save_img_path
                 )
             )
+
+
+if __name__ == "__main__":
+    config, device, logger, vdl_writer = program.preprocess()
+    main(config, device, logger, vdl_writer)
