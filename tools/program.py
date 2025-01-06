@@ -105,6 +105,8 @@ def merge_config(config, opts):
             )
             cur = config[sub_keys[0]]
             for idx, sub_key in enumerate(sub_keys[1:]):
+                if sub_key.isdigit():
+                    sub_key = int(sub_key)
                 if idx == len(sub_keys) - 2:
                     cur[sub_key] = value
                 else:

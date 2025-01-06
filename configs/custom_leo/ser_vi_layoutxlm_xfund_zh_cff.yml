@@ -1,0 +1,152 @@
+Global:
+  use_gpu: True
+  epoch_num: &epoch_num 500
+  log_smooth_window: 10
+  print_batch_step: 400
+  save_model_dir: ./output/ser_vi_layoutxlm_xfund_zh_with_mast
+  save_epoch_step: 50
+  # evaluation is run every 10 iterations after the 0th iteration
+  eval_batch_step: [ 0, 800 ]
+  cal_metric_during_train: False
+  save_inference_dir:
+  use_visualdl: False
+  seed: 2022
+  # infer_img: ./train_data/cff_dataset_kie/pages/page_54.png
+  d2s_train_image_shape: [3, 1000, 1000]
+  font_path: ./doc/fonts/simfang.ttf
+  class_path: train_data/cff_dataset_kie/class_list.txt
+  # if you want to predict using the groundtruth ocr info,
+  # you can use the following config
+  # infer_img: train_data/XFUND/zh_val/val.json
+  infer_img: ./train_data/cff_dataset_kie/Label_mast_only_for_kie_w_pages_all_1000.txt
+  # infer_img: ./rec_test/predicts_det_with_transcription.txt
+  infer_mode: False
+
+  save_res_path: ./output/ser/Label_mast_only_for_kie_w_pages_all
+  # kie_rec_model_dir: ./output/v3_en_mobile/inference
+  # kie_det_model_dir: ./output/ch_PP-OCR_v3_det/inference/Student
+  # kie_rec_model_dir: ./pretrain_models/ch_PP-OCRv3_rec_infer
+  # kie_det_model_dir: ./pretrain_models/ch_PP-OCRv3_det_infer
+  amp_custom_white_list: ['scale', 'concat', 'elementwise_add']
+
+Architecture:
+  model_type: kie
+  algorithm: &algorithm "LayoutXLM"
+  Transform:
+  Backbone:
+    name: LayoutXLMForSer
+    pretrained: 
+    # checkpoints: ./output/ser_vi_layoutxlm_xfund_zh_new_project__test/best_accuracy
+    checkpoints: 
+    # one of base or vi
+    mode: vi
+    # Assuming that n categroies are included in the dictionary file (other is included), the the num_classes is set as 2n-1
+    num_classes: &num_classes 39
+
+Loss:
+  name: VQASerTokenLayoutLMLoss
+  num_classes: *num_classes
+  key: "backbone_out"
+
+Optimizer:
+  name: AdamW
+  beta1: 0.9
+  beta2: 0.999
+  lr:
+    name: Linear
+    learning_rate: 0.00005
+    epochs: *epoch_num
+    warmup_epoch: 5
+  regularizer:
+    name: L2
+    factor: 0.00000
+    
+PostProcess:
+  name: VQASerTokenLayoutLMPostProcess
+  class_path: class_path #*class_path
+
+Metric:
+  name: VQASerTokenMetric
+  main_indicator: hmean
+
+Train:
+  dataset:
+    name: SimpleDataSet
+    data_dir: ./train_data/cff_dataset_kie/
+    label_file_list: 
+      - ./train_data/cff_dataset_kie/Label_08_10_24_with_mast_1000.txt
+      - ./train_data/cff_dataset_kie/Label_low_recall_with_mast_1000.txt
+      - ./train_data/cff_dataset_kie/Label_low_recall_3_with_mast_1000.txt
+      - ./train_data/cff_dataset_kie/Label_21_10_with_mast_1000.txt
+      - ./train_data/cff_dataset_kie/Label_23_10_with_mast_1000.txt
+    ratio_list: [1,1,1,1,1]
+    transforms:
+      - DecodeImage: # load image
+          img_mode: RGB
+          channel_first: False
+      - VQATokenLabelEncode: # Class handling label
+          contains_re: False
+          algorithm: *algorithm
+          class_path: class_path #*class_path
+          use_textline_bbox_info: &use_textline_bbox_info True
+          # one of [None, "tb-yx"]
+          order_method: &order_method "tb-yx"
+      - VQATokenPad:
+          max_seq_len: &max_seq_len 512
+          return_attention_mask: True
+      - VQASerTokenChunk:
+          max_seq_len: *max_seq_len
+      - Resize:
+          size: [1000,1000]
+      - NormalizeImage:
+          scale: 1
+          mean: [ 123.675, 116.28, 103.53 ]
+          std: [ 58.395, 57.12, 57.375 ]
+          order: 'hwc'
+      - ToCHWImage:
+      - KeepKeys:
+          keep_keys: [ 'input_ids', 'bbox', 'attention_mask', 'token_type_ids', 'image', 'labels'] # dataloader will return list in this order
+  loader:
+    shuffle: True
+    drop_last: False
+    batch_size_per_card: 2
+    num_workers: 2
+
+Eval:
+  dataset:
+    name: SimpleDataSet
+    data_dir: ./train_data/cff_dataset_kie/
+    label_file_list:
+      - ./train_data/cff_dataset_kie/Label_low_recall_3_with_mast_1000.txt
+      - ./train_data/cff_dataset_kie/Label_21_10_with_mast_1000.txt
+      - ./train_data/cff_dataset_kie/Label_23_10_with_mast_1000.txt
+    transforms:
+      - DecodeImage: # load image
+          img_mode: RGB
+          channel_first: False
+      - VQATokenLabelEncode: # Class handling label
+          contains_re: False
+          algorithm: *algorithm
+          class_path: class_path #*class_path
+          use_textline_bbox_info: *use_textline_bbox_info
+          order_method: *order_method
+      - VQATokenPad:
+          max_seq_len: *max_seq_len
+          return_attention_mask: True
+      - VQASerTokenChunk:
+          max_seq_len: *max_seq_len
+      - Resize:
+          size: [1000,1000]
+      - NormalizeImage:
+          scale: 1
+          mean: [ 123.675, 116.28, 103.53 ]
+          std: [ 58.395, 57.12, 57.375 ]
+          order: 'hwc'
+      - ToCHWImage:
+      - KeepKeys:
+          keep_keys: [ 'input_ids', 'bbox', 'attention_mask', 'token_type_ids', 'image', 'labels'] # dataloader will return list in this order
+  loader:
+    shuffle: False
+    drop_last: False
+    batch_size_per_card: 1
+    num_workers: 1
